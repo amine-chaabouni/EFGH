@@ -20,8 +20,8 @@ from test import test_odom, test_kitti_raw
 
 import yaml
 
-def main():
 
+def main():
     # ensure numba JIT is on
     if 'NUMBA_DISABLE_JIT' in os.environ:
         del os.environ['NUMBA_DISABLE_JIT']
@@ -32,20 +32,22 @@ def main():
         args = yaml.safe_load(stream)
 
     cuda = torch.cuda.is_available()
-    if cuda :
+    cuda = False
+    if cuda:
         import torch.backends.cudnn as cudnn
         cudnn.benchmark = True
         device = torch.device("cuda")
     else:
         device = torch.device("cpu")
     print("=> using '{}' for computation.".format(device))
+    args["DEVICE"] = f"{device}"
 
     # -------------------- logging args --------------------
     print("=> checking ckpt dir...")
     if args['test'] is False and os.path.exists(args['ckpt_dir']):
         if args['resume_path'] is False:
             to_continue = query_yes_no(
-                '=> Attention!!! ckpt_dir {' + args['ckpt_dir'] + '} already exists!\n' 
+                '=> Attention!!! ckpt_dir {' + args['ckpt_dir'] + '} already exists!\n'
                 + '=> Whether to continue?',
                 default=None)
             if to_continue:
@@ -69,14 +71,14 @@ def main():
                         os.rmdir(os.path.join(root, name))
             else:
                 sys.exit(1)
-    if args['test'] is False :
+    if args['test'] is False:
         os.makedirs(args['ckpt_dir'], mode=0o777, exist_ok=True)
         shutil.copyfile(sys.argv[1], os.path.join(args['ckpt_dir'], 'config.yaml'))
-        summary = SummaryWriter(args['ckpt_dir'])        
+        summary = SummaryWriter(args['ckpt_dir'])
 
-    # -------------------- dataset & loader --------------------
+        # -------------------- dataset & loader --------------------
     loader = {}
-    if args['test'] is False :
+    if args['test'] is False:
         train_dataset = data_loader.__dict__[args['dataset']](
             mode='train',
             args=args
@@ -120,12 +122,13 @@ def main():
             num_workers=args['workers'],
             pin_memory=True,
             worker_init_fn=lambda x: np.random.seed((torch.initial_seed()) % (2 ** 32))
-        )    
-    # -------------------- create model --------------------
+        )
+        # -------------------- create model --------------------
     print("=> creating model and optimizer... ")
     model = nets.__dict__[args['arch'] + 'Backbone'](args).to(device)
-    model = torch.nn.DataParallel(model)
-    if args['test'] is False :
+    if cuda:
+        model = torch.nn.DataParallel(model)
+    if args['test'] is False:
         criterion = losses.__dict__[args['arch'] + 'Criterion'](args)
 
     # -------------------- resume --------------------
@@ -136,14 +139,18 @@ def main():
             model.load_state_dict(checkpoint['state_dict'], strict=True)
             print("=> completed.")
             print("=> start iter {}, min loss {}"
-                  .format(checkpoint['iter'], checkpoint['min_loss']))         
+                  .format(checkpoint['iter'], checkpoint['min_loss']))
         else:
             print("=> no checkpoint found at '{}'".format(args['ckpt_path']))
             return
-        if args['dataset'] == 'KITTI_ODOM': test_odom(test_loader, model, args)        
-        elif args['dataset'] == 'KITTI_RAW': test_kitti_raw(test_loader, model, args)
-        elif args['dataset'] == 'NUSC': test_odom(test_loader, model, args)
-        elif args['dataset'] == 'RELLIS_3D': test_odom(test_loader, model, args)
+        if args['dataset'] == 'KITTI_ODOM':
+            test_odom(test_loader, model, args)
+        elif args['dataset'] == 'KITTI_RAW':
+            test_kitti_raw(test_loader, model, args)
+        elif args['dataset'] == 'NUSC':
+            test_odom(test_loader, model, args)
+        elif args['dataset'] == 'RELLIS_3D':
+            test_odom(test_loader, model, args)
         return
 
     elif args['resume_path']:
@@ -151,10 +158,10 @@ def main():
             print("=> loading checkpoint '{}'".format(args['resume_path']))
             checkpoint = torch.load(args['resume_path'])
             model.load_state_dict(checkpoint['state_dict'], strict=True)
-            if args['test'] is False : model = grad_false_keys_filter(model, args['grad_false_keys'])
+            if args['test'] is False: model = grad_false_keys_filter(model, args['grad_false_keys'])
             print("=> completed.")
             print("=> start iter {}, min loss {}"
-                  .format(checkpoint['iter'], checkpoint['min_loss']))         
+                  .format(checkpoint['iter'], checkpoint['min_loss']))
         else:
             print("=> no checkpoint found at '{}'".format(args['resume_path']))
             return
@@ -162,7 +169,7 @@ def main():
     elif args['pretrained_path']:
         if os.path.isfile(args['pretrained_path']):
             print("=> loading checkpoint '{}'".format(args['pretrained_path']))
-            checkpoint = torch.load(args['pretrained_path'])            
+            checkpoint = torch.load(args['pretrained_path'])
             model_dict = model.state_dict()
             pretrained_dict = checkpoint['state_dict']
             # pretrained_dict = {k: v for k, v in pretrained_dict.items() if k in model_dict}
@@ -179,11 +186,13 @@ def main():
         p for _, p in model.named_parameters() if p.requires_grad
     ]
     optimizer = torch.optim.Adam(model_named_params,
-                                    lr=args['lr'],
-                                    weight_decay=args['weight_decay'])        
+                                 lr=args['lr'],
+                                 weight_decay=args['weight_decay'])
 
     print("=> total model parameters: {:.3f}M".format(
-        sum(p.numel() for p in model.parameters())/1000000.0))
+        sum(p.numel() for p in model.parameters()) / 1000000.0))
+    for p in model.named_parameters():
+        print(p)
 
     # -------------------- main loop --------------------
     it_dict = {}
@@ -209,20 +218,22 @@ def main():
         gc.collect()
     return
 
+
 def update_dict_filter(pretrained_dict, convert_dict, model_dict):
     update_dict = {}
     for pretrainedk in pretrained_dict.keys():
         converted = False
-        for cvtk in convert_dict.keys():   
-            if cvtk in pretrainedk: 
+        for cvtk in convert_dict.keys():
+            if cvtk in pretrainedk:
                 newk = pretrainedk.replace(cvtk, convert_dict[cvtk])
                 update_dict[newk] = pretrained_dict[pretrainedk]
                 converted = True
-                print(pretrainedk , '-->', newk)
+                print(pretrainedk, '-->', newk)
         if converted == False:
             update_dict[pretrainedk] = pretrained_dict[pretrainedk]
     update_dict = {k: v for k, v in update_dict.items() if k in model_dict}
     return update_dict
+
 
 def grad_false_keys_filter(model, grad_false_keys):
     for k, p in model.named_parameters():
@@ -233,6 +244,7 @@ def grad_false_keys_filter(model, grad_false_keys):
                 k_requires_grad = False
         if k_requires_grad: print(k)
     return model
+
 
 if __name__ == '__main__':
     main()
