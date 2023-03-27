@@ -191,8 +191,6 @@ def main():
 
     print("=> total model parameters: {:.3f}M".format(
         sum(p.numel() for p in model.parameters()) / 1000000.0))
-    for p in model.named_parameters():
-        print(p)
 
     # -------------------- main loop --------------------
     it_dict = {}
